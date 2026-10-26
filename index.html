@@ -87,7 +87,7 @@ async function db(f){try{const{error}=await f();if(error)throw error;return true
 async function refresh(){
  if(!sb)return;
  try{const r=await sb.from(admin?'transaksi':'transaksi_publik').select('*').order('tanggal',{ascending:false});if(r.error)throw r.error;
- S.tx=r.data.map(x=>({id:x.id,t:x.tipe,d:x.tanggal,a:Number(x.nominal),rt:x.rt==null?'':x.rt,c:x.kategori,n:x.nama,k:x.keterangan||'',an:!!x.anonim}));
+ S.tx=r.data.map(x=>({id:x.id,t:x.tipe,d:x.tanggal,a:Number(x.nominal),rt:x.rt==null?'':x.rt,c:x.kategori,n:x.nama,k:x.keterangan||'',an:!!x.anonim,b:x.bukti_path||''}));
  const g=await sb.from('pengaturan').select('target').eq('id',1).maybeSingle();if(g.data)S.target=Number(g.data.target);err=''}catch(e){err=e.message||'tidak diketahui'}
  ready=true;render()}
 async function init(){
@@ -151,7 +151,7 @@ function dash(){
  <div class="bar"><i style="width:${mon[m].o/mm*100}%;background:var(--out)"></i></div><div class="k ot">Keluar ${rp(mon[m].o)}</div></div>`}).join('')}</div>
  <div class="card"><h2>10 Transaksi Terbaru</h2>${last.map(row).join('')}</div>`}
 function row(x){return `<div class="item"><div><b>${esc(x.t=='in'?nm(x):x.n)}</b><small>${tgl(x.d)} · ${esc(x.c)}${x.t=='in'?' · '+RT[x.rt]:''}</small>${x.k?`<small>${esc(x.k)}</small>`:''}</div>
- <div style="text-align:right"><b class="${x.t=='in'?'in':'ot'}">${x.t=='in'?'+':'−'}${rp(x.a)}</b>${admin?`<br><button class="x" onclick="del('${x.id}')">Hapus</button>`:''}</div></div>`}
+ <div style="text-align:right"><b class="${x.t=='in'?'in':'ot'}">${x.t=='in'?'+':'−'}${rp(x.a)}</b>${admin?`<br>${x.b?`<button class="x" style="color:var(--pr);margin-right:14px" onclick="lihat('${x.id}')">📎 Bukti</button>`:''}<button class="x" onclick="del('${x.id}')">Hapus</button>`:''}</div></div>`}
 function list(t){
  const isIn=t=='in',l=S.tx.filter(x=>x.t==t).sort((a,b)=>a.d<b.d?1:-1);
  const form=!admin?'':!fo?`<button class="btn big ${isIn?'':'out'}" onclick="fo=true;render()">+ Catat ${isIn?'Pemasukan':'Pengeluaran'}</button>`:`<div class="card"><h2>${isIn?'Catat Pemasukan':'Catat Pengeluaran'}</h2>
@@ -161,17 +161,41 @@ function list(t){
  ${isIn?`<label>RT asal</label><select id="fr">${RT.map((n,i)=>`<option value="${i}">${n}</option>`).join('')}</select>`:''}
  <label>Kategori</label><select id="fc">${(isIn?CI:CO).map(c=>`<option>${c}</option>`).join('')}</select>
  <label>Keterangan (boleh kosong)</label><input id="fk">
+ <label>${isIn?'Foto bukti (transfer / tanda terima)':'Foto nota / bukti pembelian'} (boleh kosong)</label><input type="file" id="ff" accept="image/*" onchange="prevF(this)"><div id="fp"></div>
+ <div class="k" style="margin-top:4px">Foto dikecilkan otomatis dan hanya bisa dilihat bendahara.</div>
  ${isIn?`<label style="display:flex;gap:10px;align-items:center;color:var(--tx)"><input type="checkbox" id="fh" style="width:24px;height:24px"> Hamba Allah (nama disamarkan untuk warga)</label>`:''}
  <button class="btn big ${isIn?'':'out'}" style="margin-top:14px" onclick="add('${t}')">Simpan</button>
  <button class="btn big ghost" style="color:var(--pr);margin:0" onclick="fo=false;render()">Batal</button></div>`;
  return form+`<div class="card"><h2>Daftar ${isIn?'Pemasukan':'Pengeluaran'}</h2><div class="v ${isIn?'in':'ot'}" style="font-size:20px;margin-bottom:6px">${rp(sum(S.tx,t))}</div>${l.map(row).join('')||'<div class="k">Belum ada data.</div>'}</div>`}
+let saving=false;
+function prevF(i){const p=document.getElementById('fp');p.innerHTML=i.files[0]?'<img alt="Pratinjau" src="'+URL.createObjectURL(i.files[0])+'" style="width:100%;max-height:220px;object-fit:contain;border-radius:10px;margin-top:8px">':''}
+function kecil(file,max=1280,q=.72){return new Promise((ok,no)=>{const im=new Image(),u=URL.createObjectURL(file);
+ im.onload=()=>{const k=Math.min(1,max/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);
+  c.getContext('2d').drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);c.toBlob(b=>b?ok(b):no(new Error('Gagal memproses foto')),'image/jpeg',q)};
+ im.onerror=()=>no(new Error('File ini bukan gambar yang bisa dibaca'));im.src=u})}
 async function add(t){
- const a=+document.getElementById('fa').value,n=document.getElementById('fn').value.trim(),d=document.getElementById('fd').value;
+ if(saving)return;
+ const a=+document.getElementById('fa').value,n=document.getElementById('fn').value.trim(),d=document.getElementById('fd').value,f=document.getElementById('ff').files[0];
  if(!(a>0)||!n||!d){await info('Data belum lengkap','Tanggal, nominal (angka positif), dan nama wajib diisi.');return}
  if(t=='out'&&a>sum(S.tx,'in')-sum(S.tx,'out')&&!(await ask('Peringatan','Pengeluaran melebihi saldo kas. Tetap simpan?')))return;
  const r={tipe:t,tanggal:d,nominal:a,rt:t=='in'?+document.getElementById('fr').value:null,kategori:document.getElementById('fc').value,nama:n,keterangan:document.getElementById('fk').value.trim(),anonim:t=='in'&&document.getElementById('fh').checked};
- if(await db(()=>sb.from('transaksi').insert(r))){fo=false;await refresh()}}
-async function del(id){if(await ask('Hapus transaksi','Hapus transaksi ini? Tidak bisa dibatalkan.')&&await db(()=>sb.from('transaksi').delete().eq('id',id)))await refresh()}
+ saving=true;let path='';
+ try{
+  if(f){let blob;try{blob=await kecil(f)}catch(e){await info('Foto bermasalah',esc(e.message));return}
+   path=d.slice(0,4)+'/'+(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2))+'.jpg';
+   const u=await sb.storage.from('bukti').upload(path,blob,{contentType:'image/jpeg'});
+   if(u.error){await info('Foto gagal diunggah',esc(u.error.message)+'. Pastikan tambah-bukti.sql sudah dijalankan di Supabase.');return}
+   r.bukti_path=path}
+  if(await db(()=>sb.from('transaksi').insert(r))){fo=false;await refresh()}
+  else if(path)await sb.storage.from('bukti').remove([path])
+ }finally{saving=false}}
+async function lihat(id){const x=S.tx.find(z=>z.id==id);if(!x||!x.b)return;
+ const{data,error}=await sb.storage.from('bukti').createSignedUrl(x.b,600);
+ if(error){info('Gagal','Foto tidak bisa dibuka: '+esc(error.message));return}
+ dlg({t:'Foto Bukti',c:false,y:'Tutup',b:`<img src="${data.signedUrl}" alt="Bukti" style="width:100%;border-radius:10px"><a class="btn" style="display:block;text-align:center;margin-top:10px;text-decoration:none" href="${data.signedUrl}" target="_blank" rel="noopener">Buka ukuran penuh</a>`})}
+async function del(id){const x=S.tx.find(z=>z.id==id);
+ if(await ask('Hapus transaksi','Hapus transaksi ini'+(x&&x.b?' beserta foto buktinya':'')+'? Tidak bisa dibatalkan.')&&await db(()=>sb.from('transaksi').delete().eq('id',id))){
+  if(x&&x.b)await sb.storage.from('bukti').remove([x.b]);await refresh()}}
 function lap(){
  const l=filt();let s=0;const a=sum(l,'in'),b=sum(l,'out');const cats=[...new Set([...CI,...CO])];
  const rows=l.map(x=>{s+=x.t=='in'?x.a:-x.a;return {x,s}}).reverse();
