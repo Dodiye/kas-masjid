@@ -77,7 +77,7 @@ const CI=['Infaq/Sedekah Warga','Donatur Tetap','Donasi Perantau','Kotak Amal/Ju
 const CO=['Material','Upah Tukang/Pekerja','Konsumsi Pekerja','Peralatan','Transportasi','Perizinan/Administrasi','Listrik & Air','Lainnya'];
 const BL=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
 const KEY='kas_masjid_nurul_iman_v1';
-let sb=null,ready=false,err='',S={target:500000000,tx:[]},admin=false,view='dash',F={from:'',to:'',rt:'',cat:''};
+let me='',mail='',sb=null,ready=false,err='',S={target:500000000,tx:[]},admin=false,view='dash',F={from:'',to:'',rt:'',cat:''};
 const today=()=>new Date().toISOString().slice(0,10);
 const num=n=>String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g,'.');
 const rp=n=>'Rp '+num(n);
@@ -87,7 +87,7 @@ async function db(f){try{const{error}=await f();if(error)throw error;return true
 async function refresh(){
  if(!sb)return;
  try{const r=await sb.from(admin?'transaksi':'transaksi_publik').select('*').order('tanggal',{ascending:false});if(r.error)throw r.error;
- S.tx=r.data.map(x=>({id:x.id,t:x.tipe,d:x.tanggal,a:Number(x.nominal),rt:x.rt==null?'':x.rt,c:x.kategori,n:x.nama,k:x.keterangan||'',an:!!x.anonim,b:x.bukti_path||''}));
+ S.tx=r.data.map(x=>({id:x.id,t:x.tipe,d:x.tanggal,a:Number(x.nominal),rt:x.rt==null?'':x.rt,c:x.kategori,n:x.nama,k:x.keterangan||'',an:!!x.anonim,b:x.bukti_path||'',o:x.dicatat_oleh||''}));
  const g=await sb.from('pengaturan').select('target').eq('id',1).maybeSingle();if(g.data)S.target=Number(g.data.target);err=''}catch(e){err=e.message||'tidak diketahui'}
  ready=true;render()}
 async function init(){
@@ -95,9 +95,10 @@ async function init(){
  let base='';try{base=new URL(SUPABASE_URL.trim()).origin}catch(e){}
  if(!/^https:\/\/[a-z0-9-]+\.supabase\.(co|in)$/i.test(base)){err='SUPABASE_URL tidak benar. Harus berbentuk https://namaproyek.supabase.co (ambil dari Project Settings > API > Project URL), bukan alamat dashboard.';ready=true;render();return}
  sb=window.supabase.createClient(base,SUPABASE_KEY.trim());
- const{data}=await sb.auth.getSession();admin=!!data.session;
- sb.auth.onAuthStateChange((ev,ses)=>{if(!!ses!==admin){admin=!!ses;refresh()}});
+ const{data}=await sb.auth.getSession();admin=!!data.session;setMe(data.session);
+ sb.auth.onAuthStateChange((ev,ses)=>{const c=setMe(ses);if(!!ses!==admin){admin=!!ses;refresh()}else if(c)render()});
  await refresh();
+ if(admin)ensureNama();
  const tick=()=>{if(!document.hidden&&!fo&&!document.querySelector('.ov'))refresh()};
  document.addEventListener('visibilitychange',tick);setInterval(tick,30000)}
 const sum=(l,t)=>l.filter(x=>x.t==t).reduce((a,x)=>a+x.a,0);
@@ -116,6 +117,12 @@ const ask=(t,b)=>dlg({t,b:'<p>'+b+'</p>',y:'Ya'}).then(v=>!!v);
 function copyBox(t,note,text,link){return dlg({t,c:false,y:'Salin',
  b:`<p class="k">${note}</p><textarea id="bk" rows="8" readonly>${esc(text)}</textarea>${link?`<a class="btn" style="display:block;text-align:center;margin-top:10px;text-decoration:none" href="${link}" target="_blank" rel="noopener">Buka WhatsApp</a>`:''}`,
  get:o=>{const x=o.querySelector('#bk');x.select();try{navigator.clipboard.writeText(x.value)}catch(e){try{document.execCommand('copy')}catch(e2){}}return true}})}
+function setMe(ses){const u=ses&&ses.user,n=(u&&u.user_metadata&&u.user_metadata.nama)||'',m=(u&&u.email)||'';const c=n!==me||m!==mail;me=n;mail=m;return c}
+async function setNama(v){v=(v||'').trim();if(!v)return;
+ if(await db(()=>sb.auth.updateUser({data:{nama:v}}))){await sb.auth.refreshSession();me=v;render()}}
+async function ensureNama(){if(me||!admin)return;
+ const v=await dlg({t:'Nama Anda',b:'<p class="k">Nama ini akan tercatat di setiap transaksi yang Anda input, misalnya "Bpk. Hasan (Bendahara)".</p><input id="nm" placeholder="Nama / jabatan">',y:'Simpan',get:o=>o.querySelector('#nm').value});
+ if(v)await setNama(v)}
 async function toggleLogin(){
  if(admin){await sb.auth.signOut();admin=false;if(view==='set')view='dash';await refresh();return}
  if(!sb){info('Belum tersambung','Isi pengaturan Supabase terlebih dahulu (lihat PANDUAN.md).');return}
@@ -123,12 +130,12 @@ async function toggleLogin(){
  if(!v)return;
  const{error}=await sb.auth.signInWithPassword({email:v.e,password:v.p});
  if(error){const m=(error.message||'').toLowerCase();
-  info('Gagal masuk',m.includes('invalid login')?'Email atau kata sandi salah, atau akun ini belum dibuat di Supabase (Authentication > Users).':m.includes('not confirmed')?'Akun belum dikonfirmasi. Di Supabase: Authentication > Users, klik akun tersebut lalu pilih Confirm email, atau buat ulang dengan mencentang Auto Confirm User.':'Pesan dari server: '+esc(error.message))}}
+  info('Gagal masuk',m.includes('invalid login')?'Email atau kata sandi salah, atau akun ini belum dibuat di Supabase (Authentication > Users).':m.includes('not confirmed')?'Akun belum dikonfirmasi. Di Supabase: Authentication > Users, klik akun tersebut lalu pilih Confirm email, atau buat ulang dengan mencentang Auto Confirm User.':'Pesan dari server: '+esc(error.message))}else{const g=await sb.auth.getSession();setMe(g.data.session);render();await ensureNama()}}
 let fo=false;
 function newTx(t){view=t=='in'?'masuk':'keluar';fo=true;render();scrollTo(0,0)}
 function go(v){view=v;fo=false;render();scrollTo(0,0)}
 function render(){
- document.getElementById('mode').textContent=admin?'Mode Bendahara':'Tampilan Warga (lihat saja)';
+ document.getElementById('mode').textContent=admin?'🟢 Masuk sebagai '+(me||mail||'Bendahara'):'Tampilan Warga (lihat saja)';
  document.getElementById('lg').textContent=admin?'Keluar':'Masuk Bendahara';
  const tabs=[['dash','🏠','Ringkasan'],['masuk','📥','Kas Masuk'],['keluar','📤','Kas Keluar'],['lap','📄','Laporan']];if(admin)tabs.push(['set','⚙️','Atur']);
  document.getElementById('nav').innerHTML=tabs.map(t=>`<button class="${view==t[0]?'on':''}" onclick="go('${t[0]}')"><span>${t[1]}</span>${t[2]}</button>`).join('');
@@ -139,7 +146,7 @@ function dash(){
  const mon={};S.tx.forEach(x=>{const m=x.d.slice(0,7);mon[m]=mon[m]||{i:0,o:0};mon[m][x.t=='in'?'i':'o']+=x.a});
  const ms=Object.keys(mon).sort(),mm=Math.max(...ms.flatMap(m=>[mon[m].i,mon[m].o]),1);
  const last=[...S.tx].sort((x,y)=>x.d<y.d?1:-1).slice(0,10);
- return `<div class="card hero"><div class="k">Saldo Kas Saat Ini</div><div class="v">${rp(a-b)}</div></div>
+ return `${admin?`<div class="card" style="border-color:var(--pr)">🟢 Masuk sebagai <b>${esc(me||'Bendahara')}</b><br><small class="k">${esc(mail)}${me?'':' · belum ada nama tampilan (atur di menu Atur)'}</small></div>`:''}<div class="card hero"><div class="k">Saldo Kas Saat Ini</div><div class="v">${rp(a-b)}</div></div>
  <div class="g2"><div class="card"><div class="k">Uang Masuk</div><div class="v in" style="font-size:18px">${rp(a)}</div></div>
  <div class="card"><div class="k">Uang Keluar</div><div class="v ot" style="font-size:18px">${rp(b)}</div></div></div>
  ${admin?`<button class="btn big" onclick="newTx('in')">+ Catat Pemasukan</button><button class="btn big out" onclick="newTx('out')">+ Catat Pengeluaran</button>`:''}
@@ -150,7 +157,7 @@ function dash(){
  <div class="bar"><i style="width:${mon[m].i/mm*100}%"></i></div><div class="k in">Masuk ${rp(mon[m].i)}</div>
  <div class="bar"><i style="width:${mon[m].o/mm*100}%;background:var(--out)"></i></div><div class="k ot">Keluar ${rp(mon[m].o)}</div></div>`}).join('')}</div>
  <div class="card"><h2>10 Transaksi Terbaru</h2>${last.map(row).join('')}</div>`}
-function row(x){return `<div class="item"><div><b>${esc(x.t=='in'?nm(x):x.n)}</b><small>${tgl(x.d)} · ${esc(x.c)}${x.t=='in'?' · '+RT[x.rt]:''}</small>${x.k?`<small>${esc(x.k)}</small>`:''}</div>
+function row(x){return `<div class="item"><div><b>${esc(x.t=='in'?nm(x):x.n)}</b><small>${tgl(x.d)} · ${esc(x.c)}${x.t=='in'?' · '+RT[x.rt]:''}</small>${x.k?`<small>${esc(x.k)}</small>`:''}${x.o?`<small>✍️ Dicatat: ${esc(x.o)}</small>`:''}</div>
  <div style="text-align:right"><b class="${x.t=='in'?'in':'ot'}">${x.t=='in'?'+':'−'}${rp(x.a)}</b>${admin?`<br>${x.b?`<button class="x" style="color:var(--pr);margin-right:14px" onclick="lihat('${x.id}')">📎 Bukti</button>`:''}<button class="x" onclick="del('${x.id}')">Hapus</button>`:''}</div></div>`}
 function list(t){
  const isIn=t=='in',l=S.tx.filter(x=>x.t==t).sort((a,b)=>a.d<b.d?1:-1);
@@ -206,13 +213,13 @@ function lap(){
  ${bt('📄','Simpan PDF','pdf()')}${bt('📊','Unduh Excel (CSV)','csv()',1)}${bt('💬','Bagikan ke WhatsApp','wa()',1)}
  <div class="card hero" style="margin-top:14px"><div class="k">Saldo periode ini</div><div class="v">${rp(a-b)}</div></div>
  <div class="g2"><div class="card"><div class="k">Masuk</div><div class="v in" style="font-size:18px">${rp(a)}</div></div><div class="card"><div class="k">Keluar</div><div class="v ot" style="font-size:18px">${rp(b)}</div></div></div>
- <div class="card"><h2>Buku Kas (${l.length} transaksi)</h2>${rows.map(r=>`<div class="item"><div><b>${esc(nm(r.x))}</b><small>${tgl(r.x.d)} · ${esc(r.x.c)}${r.x.t=='in'?' · '+RT[r.x.rt]:''}</small>${r.x.k?`<small>${esc(r.x.k)}</small>`:''}</div><div style="text-align:right"><b class="${r.x.t=='in'?'in':'ot'}">${r.x.t=='in'?'+':'−'}${rp(r.x.a)}</b><small>Saldo ${rp(r.s)}</small></div></div>`).join('')||'<div class="k">Tidak ada data.</div>'}</div>`}
+ <div class="card"><h2>Buku Kas (${l.length} transaksi)</h2>${rows.map(r=>`<div class="item"><div><b>${esc(nm(r.x))}</b><small>${tgl(r.x.d)} · ${esc(r.x.c)}${r.x.t=='in'?' · '+RT[r.x.rt]:''}</small>${r.x.k?`<small>${esc(r.x.k)}</small>`:''}${r.x.o?`<small>✍️ Dicatat: ${esc(r.x.o)}</small>`:''}</div><div style="text-align:right"><b class="${r.x.t=='in'?'in':'ot'}">${r.x.t=='in'?'+':'−'}${rp(r.x.a)}</b><small>Saldo ${rp(r.s)}</small></div></div>`).join('')||'<div class="k">Tidak ada data.</div>'}</div>`}
 async function saveFile(name,data,ft,fn,fx){
  let d=null;if(typeof claude!=='undefined')try{d=await claude.use('downloads')}catch(e){}
  if(!d){try{const u=URL.createObjectURL(data instanceof Blob?data:new Blob([data]));const a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),3000);return}catch(e){return fx?copyBox(ft,fn,fx):0}}
  try{await d.save({filename:name,data})}catch(e){if(!e||e.code!=='declined')info('Gagal menyimpan','Penyimpanan file tidak berhasil'+(e&&e.code?' ('+e.code+')':'')+'.')}}
-function csv(){const l=filt();let s=0;const r=[['Tanggal','Jenis','Uraian','Kategori','RT','Keterangan','Masuk','Keluar','Saldo']];
- l.forEach(x=>{s+=x.t=='in'?x.a:-x.a;r.push([x.d,x.t=='in'?'Masuk':'Keluar',nm(x),x.c,x.t=='in'?RT[x.rt]:'',x.k||'',x.t=='in'?x.a:'',x.t=='out'?x.a:'',s])});
+function csv(){const l=filt();let s=0;const r=[['Tanggal','Jenis','Uraian','Kategori','RT','Keterangan','Masuk','Keluar','Saldo','Dicatat oleh']];
+ l.forEach(x=>{s+=x.t=='in'?x.a:-x.a;r.push([x.d,x.t=='in'?'Masuk':'Keluar',nm(x),x.c,x.t=='in'?RT[x.rt]:'',x.k||'',x.t=='in'?x.a:'',x.t=='out'?x.a:'',s,x.o||''])});
  saveFile('Buku-Kas-Masjid-'+today()+'.csv','\ufeff'+r.map(a=>a.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n'),'Data untuk Excel / Google Sheets','Tekan Salin, lalu tempel (paste) di Excel atau Google Sheets.',r.map(a=>a.join('\t')).join('\n'))}
 async function pdf(){
  const J=window.jspdf;if(!J||!J.jsPDF){info('PDF belum siap','Pustaka PDF gagal dimuat. Periksa koneksi internet, lalu muat ulang halaman.');return}
@@ -224,7 +231,7 @@ async function pdf(){
  const per=(F.from||F.to)?'Periode: '+(F.from?tgl(F.from):'awal')+' s/d '+(F.to?tgl(F.to):'sekarang'):'Periode: seluruh transaksi';
  doc.setFont('helvetica','normal');doc.setFontSize(9);doc.text(per+(F.rt!==''?'  |  '+RT[F.rt]:'')+(F.cat?'  |  '+F.cat:''),W/2,39,{align:'center'});
  let s=0;const B={fontStyle:'bold'};
- const body=l.map(x=>{s+=x.t=='in'?x.a:-x.a;return [tgl(x.d),nm(x)+'\n'+x.c+(x.k?' - '+x.k:''),x.t=='in'?num(x.a):'',x.t=='out'?num(x.a):'',num(s)]});
+ const body=l.map(x=>{s+=x.t=='in'?x.a:-x.a;return [tgl(x.d),nm(x)+'\n'+x.c+(x.k?' - '+x.k:'')+(x.o?'\nDicatat: '+x.o:''),x.t=='in'?num(x.a):'',x.t=='out'?num(x.a):'',num(s)]});
  body.push([{content:'TOTAL',colSpan:2,styles:B},{content:num(a),styles:B},{content:num(b),styles:B},{content:num(a-b),styles:B}]);
  doc.autoTable({startY:44,head:[['Tanggal','Uraian','Masuk (Rp)','Keluar (Rp)','Saldo (Rp)']],body,styles:{fontSize:8.5,cellPadding:2},headStyles:{fillColor:[21,115,71]},columnStyles:{2:{halign:'right'},3:{halign:'right'},4:{halign:'right'}}});
  let y=doc.lastAutoTable.finalY+14;if(y>245){doc.addPage();y=30}
@@ -237,7 +244,7 @@ function wa(){const a=sum(S.tx,'in'),b=sum(S.tx,'out');
  const t=`*LAPORAN KAS MASJID NURUL IMAN SENGGIGI*\n${tgl(today())}\n\nTotal masuk: ${rp(a)}\nTotal keluar: ${rp(b)}\n*Saldo: ${rp(a-b)}*\n\nPemasukan per RT:\n`+
  RT.map((n,i)=>n+': '+rp(S.tx.filter(x=>x.t=='in'&&x.rt==i).reduce((s,x)=>s+x.a,0))).join('\n')+'\n\nJazakumullahu khairan.';
  copyBox('Bagikan ke WhatsApp','Salin teks ini, atau tekan tombol hijau untuk membuka WhatsApp.',t,'https://wa.me/?text='+encodeURIComponent(t))}
-function set(){return `<div class="card"><h2>Pengaturan</h2><label>Target dana pembangunan (Rp)</label><input type="number" value="${S.target}" onchange="setTarget(this.value)">
+function set(){return `<div class="card"><h2>Pengaturan</h2><label>Nama tampilan Anda (tercatat di transaksi baru)</label><input value="${esc(me)}" placeholder="Contoh: Bpk. Hasan (Bendahara)" onchange="setNama(this.value)"><p class="k">Akun: ${esc(mail)}</p><label>Target dana pembangunan (Rp)</label><input type="number" value="${S.target}" onchange="setTarget(this.value)">
  <label>Ganti kata sandi bendahara</label><input type="password" placeholder="Kata sandi baru (min. 8 karakter)" onchange="setPass(this.value)"></div>
  <div class="card"><h2>Cadangan Data</h2><button class="btn big" onclick="backup()">Simpan Backup (file)</button><p class="k">Disarankan simpan backup setiap bulan.</p></div>`}
 async function setTarget(v){v=+v;if(!(v>0))return;if(await db(()=>sb.from('pengaturan').upsert({id:1,target:v})))await refresh()}
